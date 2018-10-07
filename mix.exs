@@ -21,7 +21,7 @@ defmodule ExdHTML.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:exd, "~> 0.1.2"},
+      {:exd, path: "../exd"},
       {:floki, "~> 0.20.0"},
       {:mix_test_watch, "~> 0.8", only: :dev, runtime: false},
       {:ex_doc, ">= 0.0.0", only: :dev}

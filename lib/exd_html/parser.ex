@@ -15,9 +15,9 @@ defmodule ExdHTML.Parser do
   Parse a list of nodes
   """
   @spec parse_list(ExdHTML.html_node(), ExdHTML.selector()) :: [ExdHTML.html_node()]
-  def parse_list(node, selector) when is_binary(node), do: parse_list(Floki.parse(node), selector)
   def parse_list(node, selector) do
     node
+    |> parse_node
     |> Floki.find(selector)
   end
 
@@ -27,9 +27,28 @@ defmodule ExdHTML.Parser do
   @spec parse_text(ExdHTML.html_node(), ExdHTML.selector()) :: binary()
   def parse_text(node, selector) do
     node
+    |> parse_node
     |> Floki.find(selector)
     |> Floki.text
     |> String.trim
   end
+
+  @doc """
+  Parse and extract the data field of a node
+  """
+  @spec parse_attr(ExdHTML.html_node(), binary(), ExdHTML.selector()) :: binary()
+  def parse_attr(node, attr, selector) do
+    node
+    |> parse_node
+    |> Floki.find(selector)
+    |> Floki.attribute(attr)
+    |> List.first
+  end
+
+  defp parse_node(node) when is_binary(node) do
+    IO.inspect "Parsing string of size: #{byte_size(node) / 1000} kb"
+    Floki.parse(node)
+  end
+  defp parse_node(node), do: node
 
 end

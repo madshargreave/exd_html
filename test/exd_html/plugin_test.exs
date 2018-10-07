@@ -1,138 +1,98 @@
 defmodule ExdHTML.PluginTest do
   use ExUnit.Case
+  import Exd.Query.Builder
 
   alias Exd.Query
   alias Exd.Repo
 
-  defmodule MyPlugin do
-    use Exd.Plugin.String
-    use Exd.Plugin.Integer
-    use Exd.Plugin.Boolean
-    use Exd.Plugin.HTML
-  end
+  @plugins [
+    Exd.Plugin.HTMLParseList,
+    Exd.Plugin.HTMLParseText,
+    Exd.Plugin.HTMLParseAttr
+  ]
 
   setup do
-    Application.put_env(:exd, :plugin, MyPlugin)
+    Application.put_env(:exd, :plugins, @plugins)
     :ok
   end
 
-  @html """
-    <html>
-    <body>
-      <h1 class="header">Coin Table</h1>
-      <table id="coins">
-        <tbody>
-          <tr>
-            <td class="name">bitcoin</td>
-            <td class="symbol">btc</td>
-          </tr>
-          <tr>
-            <td class="name">ethereum</td>
-            <td class="symbol">eth</td>
-          </tr>
-        </tbody>
-      </table>
-    </body>
-    </html>
-  """
-
   describe "html_crawl/1" do
     test "it returns page" do
+      rows =
+        from r in fetch("https://coinmarketcap.com"),
+        select: %{
+          row: unnest(html_parse_list(r.body, "table#currencies > tbody > tr"))
+        }
+
+      coins =
+        from r in subquery(rows),
+        select: %{
+          name: html_parse_text(r.row, ".currency-name-container"),
+          slug: regex(html_parse_attr(r.row, "href", ".currency-name-container"), ~r/\/currencies\/([\-a-zA-Z0-9]+)\/$/),
+          symbol: html_parse_text(r.row, ".currency-symbol"),
+          price: cast(html_parse_attr(r.row, "data-usd", "a.price"), :float),
+          marketcap: cast(html_parse_attr(r.row, "data-usd", ".market-cap"), :float),
+          volume: cast(html_parse_attr(r.row, "data-usd", ".volume"), :float)
+        }
+
+      top_coins =
+        from c in subquery(coins),
+        where: c.marketcap > 30_000_000_000,
+        select: c
+
+      details =
+        from r in fetch(
+          interpolate("https://coinmarketcap.com/currencies/?/", args.symbol)
+        ),
+        select: %{
+          website: replace(
+            regex(
+              html_parse_attr(r.body, "href", ".details-panel-item--links > li:nth-child(2) a"),
+              ~r/https?:\/\/([a-zA-Z0-9\-\.]+\.[a-z]+)/
+            ),
+            "www",
+            ""
+          ),
+          explorer: html_parse_attr(r.body, "href", ".details-panel-item--links > li:nth-child(4) a")
+        }
+
+      alexa =
+        from r in fetch(interpolate("https://www.alexa.com/siteinfo/?", args.website)),
+        select: %{
+          alexa_global: cast(html_parse_text(r.body, ".globleRank metrics-data"), :integer)
+        }
+
+      final =
+        from c in subquery(top_coins),
+        join: d in details, on: d.symbol = c.symbol,
+        join: a in alexa, on: a.website = c.website,
+        select: merge(c, d, a)
+
       assert [
         %{
-          title: "Top 100 Cryptocurrencies by Market Capitalization"
+          marketcap: 113783675523.0,
+          name: "Bitcoin",
+          price: 6578.40789304,
+          slug: "bitcoin",
+          symbol: "BTC",
+          volume: 4126182192.98,
+          alexa_global: 14019,
+          website: "...",
+          explorer: "..."
+        },
+        %{
+          marketcap: 23731849182.5,
+          name: "Ethereum",
+          price: 232.038863278,
+          slug: "ethereum",
+          symbol: "ETH",
+          volume: 2098614651.97,
+          alexa_global: 14019,
+          website: "...",
+          explorer: "..."
         }
-      ] ==
-        Query.new
-        |> Query.from("html", {:html_crawl, "'https://coinmarketcap.com'"})
-        |> Query.select(%{
-          title: {:html_parse_text, "html.body", "'h1.text-center.h2'"}
-        })
-        |> Repo.stream
-        |> Enum.to_list
-    end
-  end
-
-  describe "html_parse_list/1" do
-    test "it extracts text from node" do
-      assert [
-        %{name: "bitcoin", symbol: "btc"},
-        %{name: "ethereum", symbol: "eth"}
-      ] ==
-        Query.new
-        |> Query.from("rows", {:html_parse_list, "'#{@html}'", "'table#coins > tbody > tr'"})
-        |> Query.select(%{
-          name: {:html_parse_text, "rows", "'.name'"},
-          symbol: {:html_parse_text, "rows", "'.symbol'"}
-        })
-        |> Repo.stream
-        |> Enum.to_list
-    end
-  end
-
-  describe "html_parse_text/1" do
-    test "it extracts text from html string" do
-      assert [
-        %{name: "Coin Table"}
-      ] ==
-        Query.new
-        |> Query.from("html", {:html_parse, "'#{@html}'"})
-        |> Query.select(%{
-          name: {:html_parse_text, "html", "'h1.header'"}
-        })
-        |> Repo.stream
-        |> Enum.to_list
+      ] = Repo.all(final)
     end
   end
 
 end
-
-alias Exd.Query
-
-coins = {
-  :html_crawl,
-  "https://coinmarketcap.com",
-  [
-    concurrency: 1
-  ]
-}
-
-details = {
-  :source,
-  {
-    :html_crawl,
-    {:replace, "https://coinmarketcap.com/currencies/{{symbol}}", symbol: "args.symbol"},
-    [
-      concurrency: 5,
-      timeout: 5000,
-      retries: 3
-    ]
-  },
-  [
-    symbol: {:string, required: true}
-  ]
-}
-
-query =
-  Query.new
-  |> Query.from("coins", coins)
-  |> Query.select({:html_parse_list, "coins.document", "table#currencies tr"})
-
-query =
-  Query.new
-  |> Query.from("coins", query)
-  |> Query.join("details", details, symbol: "coins.symbol")
-  |> Query.select(%{
-    name: {:html_parse_text, "coins", ".currency-name-name"},
-    symbol: {:html_parse_text, "coins", ".currency-symbol-name"},
-    marketcap: {:html_parse_currency, "coins", ".currency-marketcap-name"},
-    price: {:html_parse_currency, "coins", ".currency-price-name"},
-    twitter_followers: {:html_parse_integer, "details.content", ".stats > .twitter_followers"},
-    reddit_subs: {:html_parse_integer, "details.content", ".stats > .reddit_subs"}
-  })
-
-query =
-  Query.new
-  |> Query.from("coins", query)
-  |> Query.where("coins.marketcap", :>, 100_000_000)
-  |> Query.into("top-coins")
