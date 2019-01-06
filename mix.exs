@@ -3,8 +3,8 @@ defmodule ExdHTML.MixProject do
 
   def project do
     [
-      app: :exd_html,
-      version: "0.1.1",
+      app: :exd_plugin_html,
+      version: "0.1.2",
       elixir: "~> 1.7",
       description: description(),
       package: package(),
