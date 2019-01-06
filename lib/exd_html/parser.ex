@@ -46,7 +46,6 @@ defmodule ExdHTML.Parser do
   end
 
   defp parse_node(node) when is_binary(node) do
-    IO.inspect "Parsing string of size: #{byte_size(node) / 1000} kb"
     Floki.parse(node)
   end
   defp parse_node(node), do: node

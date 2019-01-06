@@ -16,6 +16,8 @@ defmodule ExdHTML.PluginTest do
     :ok
   end
 
+  select * from fetch("https://coinmarketcap.com")
+
   describe "html_crawl/1" do
     test "it returns page" do
       rows =
